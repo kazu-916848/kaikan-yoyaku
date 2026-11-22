@@ -1,0 +1,391 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>桜台自治会館 予約</title>
+<script charset="utf-8" src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: -apple-system, "Hiragino Sans", "Noto Sans JP", sans-serif;
+         font-size: 16px; color: #222; background: #f5f5f5; }
+  header { background: #06c755; color: #fff; padding: 12px 16px; font-size: 18px; font-weight: bold; }
+  section { background: #fff; margin: 10px; padding: 12px; border-radius: 8px; }
+  h2 { font-size: 16px; margin: 0 0 8px; }
+  .note { font-size: 13px; color: #666; }
+  .hidden { display: none; }
+  button { font-size: 15px; padding: 8px 12px; border-radius: 6px; border: 1px solid #bbb; background: #fff; color: #222; }
+  button:disabled { opacity: .5; }
+  button.primary { background: #06c755; color: #fff; border: none; width: 100%; padding: 12px; font-size: 16px; }
+
+  /* 色の意味 */
+  .c-free { background: #8fd9a8; } .c-temp { background: #f5c26b; }
+  .c-booked, .c-closed { background: #b5b5b5; } .c-out { background: #ececec; }
+  .legend { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 12px; color: #555; margin-bottom: 8px; }
+  .legend i { display: inline-block; width: 12px; height: 12px; border-radius: 2px; vertical-align: -1px; margin-right: 3px; }
+
+  /* 2週間の一覧 */
+  .nav { display: flex; justify-content: space-between; margin-bottom: 8px; }
+  .day { display: flex; align-items: center; gap: 6px; padding: 5px 0; border-bottom: 1px solid #f0f0f0; }
+  .day.tap { cursor: pointer; }
+  .day.active { background: #f0fbf4; }
+  .day .dl { width: 74px; font-size: 14px; white-space: nowrap; flex-shrink: 0; }
+  .bar { flex: 1; display: flex; gap: 1px; }
+  .bar span { flex: 1; height: 20px; }
+  .bar span:first-child { border-radius: 3px 0 0 3px; } .bar span:last-child { border-radius: 0 3px 3px 0; }
+  .scale { display: flex; gap: 6px; } .scale .dl { width: 74px; flex-shrink: 0; }
+  .scale .bar span { height: auto; font-size: 10px; color: #888; overflow: visible; white-space: nowrap; }
+  .sat { color: #1a62c9; } .sun { color: #d33; }
+
+  /* 1日の時間選択 */
+  .hours { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+  .hours button { padding: 10px 4px; font-size: 15px; text-align: center; border: 1px solid #ccc; }
+  .hours button.free { background: #e6f9ee; border-color: #8fd9a8; }
+  .hours button.sel { background: #06c755; color: #fff; border-color: #06c755; font-weight: bold; }
+  .hours button.busy { background: #f2f2f2; color: #999; }
+  .hours button small { display: block; font-size: 11px; }
+  .picked { font-weight: bold; font-size: 17px; margin: 10px 0; min-height: 1.4em; }
+  label { display: block; margin: 10px 0 4px; font-size: 14px; }
+  input { width: 100%; font-size: 16px; padding: 8px; border: 1px solid #bbb; border-radius: 6px; }
+  .row-btns { display: flex; gap: 8px; margin-top: 12px; }
+  .row-btns button { flex: 1; }
+
+  .msg { margin: 10px; padding: 10px; border-radius: 6px; display: none; white-space: pre-wrap; }
+  .msg.ok { display: block; background: #e6f9ee; color: #06873b; }
+  .msg.ng { display: block; background: #fdecec; color: #c62828; }
+  .mine-item { border-bottom: 1px solid #eee; padding: 8px 0; display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+  .mine-item:last-child { border-bottom: none; }
+  .badge { font-size: 12px; padding: 2px 6px; border-radius: 4px; margin-left: 4px; }
+  .badge.temp { background: #fff3d6; } .badge.ok { background: #e6f9ee; color: #06873b; }
+</style>
+</head>
+<body>
+<header>桜台自治会館 予約</header>
+<div id="msg" class="msg"></div>
+
+<section id="calendar">
+  <h2>空き状況（日付を押して時間を選ぶ）</h2>
+  <div class="legend">
+    <span><i class="c-free"></i>空き</span><span><i class="c-temp"></i>仮予約あり</span>
+    <span><i class="c-booked"></i>予約済み・休館</span><span><i class="c-out"></i>受付外</span>
+  </div>
+  <div class="nav">
+    <button id="prev">◀ 前の2週間</button>
+    <button id="next">次の2週間 ▶</button>
+  </div>
+  <div id="days" class="note">読み込み中…</div>
+</section>
+
+<section id="dayview" class="hidden">
+  <h2 id="day-title"></h2>
+  <p class="note">使い始める時間を押し、続けて最後の時間を押してください。<br>（1時間だけなら1回押すだけ）</p>
+  <div class="hours" id="hours"></div>
+  <div class="picked" id="picked"></div>
+
+  <div id="form" class="hidden">
+    <label for="f-name">氏名・団体名</label>
+    <input id="f-name" maxlength="50" autocomplete="name">
+    <label for="f-purpose">用途（例：〇〇班 会合）</label>
+    <input id="f-purpose" maxlength="100">
+    <label for="f-people">人数</label>
+    <input id="f-people" type="number" inputmode="numeric" min="1" max="300">
+    <label for="f-phone">電話番号</label>
+    <input id="f-phone" type="tel" inputmode="tel" maxlength="20" autocomplete="tel">
+    <div class="row-btns">
+      <button id="f-submit" class="primary">仮予約する</button>
+    </div>
+    <p class="note">担当者が確認後、公式LINEで確定をお知らせします。</p>
+  </div>
+  <div class="row-btns"><button id="day-close">閉じる</button></div>
+</section>
+
+<section id="mine">
+  <h2>わたしの予約</h2>
+  <div id="mine-list" class="note">読み込み中…</div>
+</section>
+
+<section><p class="note" id="contact"></p></section>
+
+<script>
+// ▼▼ ここを自分の値に書きかえる ▼▼
+const LIFF_ID = 'ここにLIFF IDを入れる';
+const GAS_URL = 'ここにGASのウェブアプリURLを入れる';
+// ▲▲ ここまで ▲▲
+
+const DAYS = 14;
+const STATE_TEXT = { free: '空き', temp: '仮予約あり', booked: '予約済み', closed: '休館', out: '受付外' };
+
+let idToken = null;
+let startDate = null;
+let today = null;
+let info = null;        // 開館時刻など（open, close, maxHours）
+let dayMap = {};        // 日付 → 時間ごとの状態
+let curDate = null;     // 選択中の日
+let sel = null;         // 選択中の時間 { start, end }（end は終了時刻）
+
+const $ = (id) => document.getElementById(id);
+const hh = (h) => `${h}:00`;
+
+// ---- 日付の計算（日本時間で yyyy-mm-dd） ----
+function todayStr() { return new Date(Date.now() + 9 * 3600e3).toISOString().slice(0, 10); }
+function addDays(s, n) { const d = new Date(s + 'T00:00:00Z'); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); }
+function dayOfWeek(s) { return new Date(s + 'T00:00:00Z').getUTCDay(); }
+function label(s) { const [, m, d] = s.split('-'); return `${Number(m)}/${Number(d)}（${'日月火水木金土'[dayOfWeek(s)]}）`; }
+
+function showMsg(text, isError) {
+  const el = $('msg');
+  el.textContent = text;
+  el.className = 'msg ' + (isError ? 'ng' : 'ok');
+  window.scrollTo(0, 0);
+}
+function clearMsg() { $('msg').className = 'msg'; }
+
+// ---- GASとの通信 ----
+async function getJson(url) {
+  const res = await fetch(url);
+  const j = await res.json();
+  if (!j.ok) throw new Error(j.error);
+  return j;
+}
+async function post(data) {
+  // text/plain で送ると、ブラウザの事前確認（CORS）が起きずGASで受け取れる
+  const res = await fetch(GAS_URL, { method: 'POST', body: JSON.stringify({ ...data, idToken }) });
+  const j = await res.json();
+  if (!j.ok) throw new Error(j.error);
+  return j;
+}
+
+// ---- 2週間の一覧 ----
+async function loadCalendar() {
+  const j = await getJson(`${GAS_URL}?action=availability&from=${startDate}&days=${DAYS}`);
+  today = j.today;
+  info = { open: j.open, close: j.close, maxHours: j.maxHours };
+  if (j.contact) $('contact').textContent = 'お問い合わせ：' + j.contact;
+  dayMap = {};
+  const box = $('days');
+  box.textContent = '';
+  box.className = '';
+
+  // 目盛り（3時間ごと）
+  const scale = document.createElement('div');
+  scale.className = 'scale';
+  const sp = document.createElement('div');
+  sp.className = 'dl';
+  const sbar = document.createElement('div');
+  sbar.className = 'bar';
+  for (let h = j.open; h < j.close; h++) {
+    const s = document.createElement('span');
+    s.textContent = h % 3 === 0 ? String(h) : '';
+    sbar.appendChild(s);
+  }
+  scale.append(sp, sbar);
+  box.appendChild(scale);
+
+  j.days.forEach((day) => {
+    dayMap[day.date] = day.hours;
+    const row = document.createElement('div');
+    row.className = 'day';
+    row.dataset.date = day.date;
+    if (day.date === curDate) row.classList.add('active');
+    const dl = document.createElement('div');
+    dl.className = 'dl';
+    dl.textContent = label(day.date);
+    const w = dayOfWeek(day.date);
+    if (w === 6) dl.classList.add('sat');
+    if (w === 0) dl.classList.add('sun');
+    const bar = document.createElement('div');
+    bar.className = 'bar';
+    day.hours.forEach((st) => {
+      const s = document.createElement('span');
+      s.className = 'c-' + st;
+      bar.appendChild(s);
+    });
+    row.append(dl, bar);
+    if (day.hours.includes('free')) {
+      row.classList.add('tap');
+      row.onclick = () => openDay(day.date);
+    }
+    box.appendChild(row);
+  });
+  $('prev').disabled = startDate <= today;
+  if (curDate && dayMap[curDate]) renderHours(); // 開いている日の表示を最新にする
+}
+
+// ---- 1日の時間選択 ----
+function openDay(date) {
+  clearMsg();
+  curDate = date;
+  sel = null;
+  document.querySelectorAll('.day').forEach((el) => el.classList.toggle('active', el.dataset.date === date));
+  $('day-title').textContent = label(date) + ' の予約';
+  $('dayview').classList.remove('hidden');
+  renderHours();
+  $('dayview').scrollIntoView({ behavior: 'smooth' });
+}
+
+function closeDay() {
+  curDate = null;
+  sel = null;
+  $('dayview').classList.add('hidden');
+  document.querySelectorAll('.day').forEach((el) => el.classList.remove('active'));
+}
+
+function renderHours() {
+  const hours = dayMap[curDate] || [];
+  const box = $('hours');
+  box.textContent = '';
+  hours.forEach((st, i) => {
+    const h = info.open + i;
+    const b = document.createElement('button');
+    b.textContent = `${hh(h)}〜${hh(h + 1)}`;
+    const small = document.createElement('small');
+    small.textContent = STATE_TEXT[st];
+    b.appendChild(small);
+    if (st === 'free') {
+      b.className = (sel && h >= sel.start && h < sel.end) ? 'sel' : 'free';
+      b.onclick = () => tapHour(h);
+    } else {
+      b.className = 'busy';
+      b.disabled = true;
+    }
+    box.appendChild(b);
+  });
+  if (sel) {
+    $('picked').textContent = `選択中：${hh(sel.start)}〜${hh(sel.end)}（${sel.end - sel.start}時間）`;
+    $('form').classList.remove('hidden');
+  } else {
+    $('picked').textContent = '';
+    $('form').classList.add('hidden');
+  }
+}
+
+/**
+ * 1回目に押した時間が「開始」、2回目に押した時間が「最後の1時間」。
+ * 選択済みの範囲がある状態で押すと、そこから選び直しになる。
+ */
+function tapHour(h) {
+  const hours = dayMap[curDate];
+  const single = sel && sel.end - sel.start === 1;
+  if (single && h > sel.start) {
+    let ok = true;
+    for (let x = sel.start; x <= h; x++) if (hours[x - info.open] !== 'free') ok = false;
+    if (!ok) {
+      showMsg('途中に予約が入っている時間があるため、続けて選べません。', true);
+      sel = { start: h, end: h + 1 };
+    } else if (h + 1 - sel.start > info.maxHours) {
+      showMsg(`1回の利用は${info.maxHours}時間までです。`, true);
+      sel = { start: h, end: h + 1 };
+    } else {
+      clearMsg();
+      sel = { start: sel.start, end: h + 1 };
+    }
+  } else if (single && h === sel.start) {
+    sel = null; // 同じ時間をもう一度押したら選択解除
+  } else {
+    clearMsg();
+    sel = { start: h, end: h + 1 };
+  }
+  renderHours();
+}
+
+async function submit() {
+  if (!curDate || !sel) return;
+  const data = {
+    action: 'reserve',
+    date: curDate,
+    start: sel.start,
+    end: sel.end,
+    name: $('f-name').value.trim(),
+    purpose: $('f-purpose').value.trim(),
+    people: $('f-people').value,
+    phone: $('f-phone').value.trim(),
+  };
+  if (!data.name || !data.purpose || !data.people || !data.phone) {
+    showMsg('すべての項目を入力してください。', true);
+    return;
+  }
+  const btn = $('f-submit');
+  btn.disabled = true;
+  btn.textContent = '送信中…';
+  try {
+    const j = await post(data);
+    closeDay();
+    showMsg(`仮予約を受け付けました。\n予約番号：${j.id}\n${label(data.date)} ${hh(data.start)}〜${hh(data.end)}\n確定したら公式LINEでお知らせします。`);
+    await Promise.all([loadCalendar(), loadMine()]);
+  } catch (e) {
+    showMsg(e.message, true);
+    sel = null;
+    loadCalendar();
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '仮予約する';
+  }
+}
+
+// ---- わたしの予約 ----
+async function loadMine() {
+  const box = $('mine-list');
+  try {
+    const j = await post({ action: 'mine' });
+    box.textContent = '';
+    if (!j.list.length) { box.textContent = '予約はありません。'; return; }
+    j.list.forEach((r) => {
+      const item = document.createElement('div');
+      item.className = 'mine-item';
+      const text = document.createElement('div');
+      text.textContent = `${label(r.date)} ${r.start}〜${r.end}　${r.purpose}`;
+      const badge = document.createElement('span');
+      badge.className = 'badge ' + (r.status === '確定' ? 'ok' : 'temp');
+      badge.textContent = r.status;
+      text.appendChild(badge);
+      const btn = document.createElement('button');
+      btn.textContent = '取り消す';
+      btn.onclick = () => cancelReservation(r.id, btn);
+      item.append(text, btn);
+      box.appendChild(item);
+    });
+  } catch (e) {
+    box.textContent = '読み込めませんでした：' + e.message;
+  }
+}
+
+async function cancelReservation(id, btn) {
+  // 1回目は確認表示、2回目で取り消し（誤操作防止）
+  if (btn.dataset.confirm !== '1') {
+    btn.dataset.confirm = '1';
+    btn.textContent = 'もう一度押すと取消';
+    setTimeout(() => { btn.dataset.confirm = ''; btn.textContent = '取り消す'; }, 4000);
+    return;
+  }
+  btn.disabled = true;
+  try {
+    await post({ action: 'cancel', id });
+    showMsg('予約を取り消しました。');
+    await Promise.all([loadCalendar(), loadMine()]);
+  } catch (e) {
+    showMsg(e.message, true);
+    btn.disabled = false;
+  }
+}
+
+// ---- 起動 ----
+async function main() {
+  $('prev').onclick = () => { startDate = addDays(startDate, -DAYS); if (startDate < today) startDate = today; closeDay(); loadCalendar(); };
+  $('next').onclick = () => { startDate = addDays(startDate, DAYS); closeDay(); loadCalendar(); };
+  $('day-close').onclick = closeDay;
+  $('f-submit').onclick = submit;
+  try {
+    await liff.init({ liffId: LIFF_ID });
+    if (!liff.isLoggedIn()) { liff.login({ redirectUri: location.href }); return; }
+    idToken = liff.getIDToken();
+    startDate = todayStr();
+    today = startDate;
+    await Promise.all([loadCalendar(), loadMine()]);
+  } catch (e) {
+    showMsg('起動できませんでした：' + e.message, true);
+  }
+}
+main();
+</script>
+</body>
+</html>
