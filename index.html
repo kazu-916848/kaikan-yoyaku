@@ -127,6 +127,7 @@
     <button id="tab-pending" class="on">仮予約 <span id="pending-count"></span></button>
     <button id="tab-upcoming">確定済み</button>
     <button id="tab-add">登録</button>
+    <button id="tab-print">予定表</button>
   </div>
   <div id="pane-pending"></div>
   <div id="pane-upcoming" class="hidden"></div>
@@ -153,6 +154,17 @@
     <label for="a-memo">メモ（任意）</label>
     <input id="a-memo" maxlength="100">
     <div class="row-btns"><button id="a-submit" class="primary">登録する</button></div>
+  </div>
+  <div id="pane-print" class="hidden">
+    <p class="note">1か月分の予定表をA4横のPDFにします。自治会館に貼り出す紙の予定表として印刷できます（電話番号は載りません）。</p>
+    <label for="p-month">月</label>
+    <select id="p-month"></select>
+    <div class="row-btns"><button id="p-submit" class="primary">PDFを作る</button></div>
+    <div id="p-result" class="hidden">
+      <p class="note">PDFができました。開いた画面の共有ボタンから、印刷やファイルへの保存ができます。</p>
+      <div class="row-btns"><button id="p-open">PDFを開く</button></div>
+    </div>
+    <p class="note">作成には10〜20秒ほどかかります。PDFは役員のGoogleドライブ「自治会館予定表」フォルダに保存され、リンクを知っている人が見られる設定になります。</p>
   </div>
 </section>
 
@@ -449,7 +461,7 @@ function hourOptions(sel, from, to, value) {
 }
 
 function switchTab(name) {
-  ['pending', 'upcoming', 'add'].forEach((t) => {
+  ['pending', 'upcoming', 'add', 'print'].forEach((t) => {
     $('tab-' + t).classList.toggle('on', t === name);
     $('pane-' + t).classList.toggle('hidden', t !== name);
   });
@@ -652,7 +664,53 @@ async function joinStaff() {
   }
 }
 
+// ---- 予定表（PDF） ----
+let pdfUrl = null;
+
+function fillMonths() {
+  const sel = $('p-month');
+  if (sel.options.length) return;
+  const base = today || todayStr();
+  let y = Number(base.slice(0, 4));
+  let m = Number(base.slice(5, 7));
+  for (let i = 0; i < 3; i++) {
+    const o = document.createElement('option');
+    o.value = `${y}-${String(m).padStart(2, '0')}`;
+    o.textContent = `${y}年${m}月` + (i === 0 ? '（今月）' : i === 1 ? '（来月）' : '');
+    sel.appendChild(o);
+    m++;
+    if (m > 12) { m = 1; y++; }
+  }
+}
+
+async function makePdf() {
+  const btn = $('p-submit');
+  btn.disabled = true;
+  btn.textContent = '作成中…';
+  $('p-result').classList.add('hidden');
+  try {
+    const j = await post({ action: 'staffSchedule', ym: $('p-month').value });
+    pdfUrl = j.url;
+    $('p-result').classList.remove('hidden');
+  } catch (e) {
+    showMsg(e.message, true);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'PDFを作る';
+  }
+}
+
+function openPdf() {
+  if (!pdfUrl) return;
+  // LINEの中ではなく、SafariやChromeで開くと印刷しやすい
+  if (window.liff && liff.isInClient()) liff.openWindow({ url: pdfUrl, external: true });
+  else window.open(pdfUrl, '_blank');
+}
+
 function setupStaffEvents() {
+  $('tab-print').onclick = () => { fillMonths(); switchTab('print'); };
+  $('p-submit').onclick = makePdf;
+  $('p-open').onclick = openPdf;
   $('tab-pending').onclick = () => switchTab('pending');
   $('tab-upcoming').onclick = () => switchTab('upcoming');
   $('tab-add').onclick = () => switchTab('add');
