@@ -57,6 +57,23 @@
   .mine-item:last-child { border-bottom: none; }
   .badge { font-size: 12px; padding: 2px 6px; border-radius: 4px; margin-left: 4px; }
   .badge.temp { background: #fff3d6; } .badge.ok { background: #e6f9ee; color: #06873b; }
+  /* 担当者メニュー */
+  #staff { border: 2px solid #f0a040; }
+  .tabs { display: flex; gap: 4px; margin-bottom: 10px; }
+  .tabs button { flex: 1; padding: 8px 2px; font-size: 14px; }
+  .tabs button.on { background: #f0a040; color: #fff; border-color: #f0a040; font-weight: bold; }
+  .card { border: 1px solid #e3e3e3; border-radius: 6px; padding: 8px 10px; margin-bottom: 8px; font-size: 14px; }
+  .card .when { font-weight: bold; font-size: 15px; }
+  .card .sub { color: #555; margin-top: 2px; }
+  .card a { color: #1a62c9; }
+  .card .acts { display: flex; gap: 6px; margin-top: 8px; }
+  .card .acts button { flex: 1; padding: 8px 4px; font-size: 14px; }
+  .card .acts button.ok { background: #06c755; color: #fff; border: none; }
+  .card .acts button.ng { color: #c62828; border-color: #e0a0a0; }
+  .route { font-size: 11px; padding: 1px 5px; border-radius: 3px; background: #eee; margin-left: 4px; }
+  select { width: 100%; font-size: 16px; padding: 8px; border: 1px solid #bbb; border-radius: 6px; background: #fff; }
+  .two { display: flex; gap: 8px; } .two > div { flex: 1; }
+  .linkbtn { background: none; border: none; color: #1a62c9; padding: 0; font-size: 13px; text-decoration: underline; }
 </style>
 </head>
 <body>
@@ -104,7 +121,53 @@
   <div id="mine-list" class="note">読み込み中…</div>
 </section>
 
-<section><p class="note" id="contact"></p></section>
+<section id="staff" class="hidden">
+  <h2>担当者メニュー <span id="staff-name" class="note"></span></h2>
+  <div class="tabs">
+    <button id="tab-pending" class="on">仮予約 <span id="pending-count"></span></button>
+    <button id="tab-upcoming">確定済み</button>
+    <button id="tab-add">登録</button>
+  </div>
+  <div id="pane-pending"></div>
+  <div id="pane-upcoming" class="hidden"></div>
+  <div id="pane-add" class="hidden">
+    <p class="note">紙・電話で受けた予約や休館日を登録します（「確定」として登録されます）。</p>
+    <label for="a-route">種類</label>
+    <select id="a-route"><option>紙</option><option>電話</option><option>休館</option></select>
+    <label for="a-date">利用日</label>
+    <input id="a-date" type="date">
+    <div class="two">
+      <div><label for="a-start">開始</label><select id="a-start"></select></div>
+      <div><label for="a-end">終了</label><select id="a-end"></select></div>
+    </div>
+    <div id="a-detail">
+      <label for="a-name">氏名・団体名</label>
+      <input id="a-name" maxlength="50">
+      <label for="a-purpose">用途</label>
+      <input id="a-purpose" maxlength="100">
+      <div class="two">
+        <div><label for="a-people">人数</label><input id="a-people" type="number" inputmode="numeric" min="1" max="300"></div>
+        <div><label for="a-phone">電話番号</label><input id="a-phone" type="tel" inputmode="tel" maxlength="20"></div>
+      </div>
+    </div>
+    <label for="a-memo">メモ（任意）</label>
+    <input id="a-memo" maxlength="100">
+    <div class="row-btns"><button id="a-submit" class="primary">登録する</button></div>
+  </div>
+</section>
+
+<section id="staff-join" class="hidden">
+  <h2>担当者の登録</h2>
+  <p class="note">役員会で決めた合言葉を入力すると、この画面に担当者メニューが表示されます。</p>
+  <label for="j-name">氏名</label>
+  <input id="j-name" maxlength="30">
+  <label for="j-code">合言葉</label>
+  <input id="j-code" maxlength="50" autocomplete="off">
+  <div class="row-btns"><button id="j-submit" class="primary">担当者として登録</button></div>
+</section>
+
+<section><p class="note" id="contact"></p>
+  <button id="join-link" class="linkbtn hidden">担当者の方はこちら</button></section>
 
 <script>
 // ▼▼ ここを自分の値に書きかえる ▼▼
@@ -310,6 +373,7 @@ async function submit() {
   try {
     const j = await post(data);
     closeDay();
+    if (staffData) loadStaff();
     showMsg(`仮予約を受け付けました。\n予約番号：${j.id}\n${label(data.date)} ${hh(data.start)}〜${hh(data.end)}\n確定したら公式LINEでお知らせします。`);
     await Promise.all([loadCalendar(), loadMine()]);
   } catch (e) {
@@ -368,19 +432,254 @@ async function cancelReservation(id, btn) {
   }
 }
 
+// ============================================================
+// 担当者メニュー
+// ============================================================
+let staffData = null;
+
+function hourOptions(sel, from, to, value) {
+  sel.textContent = '';
+  for (let h = from; h <= to; h++) {
+    const o = document.createElement('option');
+    o.value = h;
+    o.textContent = hh(h);
+    if (h === value) o.selected = true;
+    sel.appendChild(o);
+  }
+}
+
+function switchTab(name) {
+  ['pending', 'upcoming', 'add'].forEach((t) => {
+    $('tab-' + t).classList.toggle('on', t === name);
+    $('pane-' + t).classList.toggle('hidden', t !== name);
+  });
+}
+
+async function checkStaff() {
+  const j = await post({ action: 'whoami' });
+  if (j.isStaff) {
+    $('staff-name').textContent = `（${j.name}さん）`;
+    $('staff').classList.remove('hidden');
+    $('staff-join').classList.add('hidden');
+    $('join-link').classList.add('hidden');
+    await loadStaff();
+  } else {
+    $('join-link').classList.remove('hidden');
+  }
+}
+
+async function loadStaff() {
+  try {
+    staffData = await post({ action: 'staffList' });
+  } catch (e) {
+    $('pane-pending').textContent = '読み込めませんでした：' + e.message;
+    return;
+  }
+  $('pending-count').textContent = staffData.pending.length ? `(${staffData.pending.length})` : '';
+  renderStaffList($('pane-pending'), staffData.pending, '仮予約はありません。');
+  renderStaffList($('pane-upcoming'), staffData.upcoming, '今後の確定済み予約はありません。');
+  if (!$('a-start').options.length) {
+    hourOptions($('a-start'), staffData.open, staffData.close - 1, staffData.open);
+    hourOptions($('a-end'), staffData.open + 1, staffData.close, staffData.close);
+    $('a-date').value = today || todayStr();
+  }
+}
+
+function renderStaffList(box, list, emptyText) {
+  box.textContent = '';
+  if (!list.length) {
+    const p = document.createElement('p');
+    p.className = 'note';
+    p.textContent = emptyText;
+    box.appendChild(p);
+    return;
+  }
+  list.forEach((r) => box.appendChild(staffCard(r)));
+}
+
+function staffCard(r) {
+  const card = document.createElement('div');
+  card.className = 'card';
+
+  const when = document.createElement('div');
+  when.className = 'when';
+  when.textContent = `${label(r.date)} ${hh(r.start)}〜${hh(r.end)}`;
+  const route = document.createElement('span');
+  route.className = 'route';
+  route.textContent = r.route;
+  when.appendChild(route);
+
+  const who = document.createElement('div');
+  who.textContent = r.name + (r.purpose ? `　${r.purpose}` : '') + (r.people ? `　${r.people}人` : '');
+
+  const sub = document.createElement('div');
+  sub.className = 'sub';
+  if (r.phone) {
+    const a = document.createElement('a');
+    a.href = 'tel:' + r.phone;
+    a.textContent = '☎ ' + r.phone;
+    sub.appendChild(a);
+  }
+  if (r.created) sub.append(`　受付 ${r.created}`);
+  card.append(when, who, sub);
+  if (r.memo) {
+    const memo = document.createElement('div');
+    memo.className = 'sub';
+    memo.textContent = 'メモ：' + r.memo;
+    card.appendChild(memo);
+  }
+
+  const acts = document.createElement('div');
+  acts.className = 'acts';
+  if (r.status === '仮予約') {
+    acts.append(
+      actionButton('確定', 'ok', () => setStatus(r.id, '確定')),
+      actionButton('お断り', 'ng', () => showReject(card, r)),
+    );
+  } else {
+    acts.append(actionButton('キャンセル', 'ng', () => setStatus(r.id, 'キャンセル')));
+  }
+  card.appendChild(acts);
+  return card;
+}
+
+/** 誤操作防止：1回目で確認表示、2回目で実行（お断りは理由入力へ進むので1回） */
+function actionButton(text, cls, fn) {
+  const b = document.createElement('button');
+  b.className = cls;
+  b.textContent = text;
+  b.onclick = async () => {
+    if (text !== 'お断り' && b.dataset.confirm !== '1') {
+      b.dataset.confirm = '1';
+      b.textContent = `もう一度押すと${text}`;
+      setTimeout(() => { b.dataset.confirm = ''; b.textContent = text; }, 4000);
+      return;
+    }
+    b.disabled = true;
+    try { await fn(); } finally { b.disabled = false; }
+  };
+  return b;
+}
+
+function showReject(card, r) {
+  if (card.querySelector('.reject')) return;
+  const box = document.createElement('div');
+  box.className = 'reject';
+  const input = document.createElement('input');
+  input.placeholder = 'お断りの理由（予約者に送られます。空欄可）';
+  input.maxLength = 100;
+  input.style.marginTop = '8px';
+  const acts = document.createElement('div');
+  acts.className = 'acts';
+  const back = document.createElement('button');
+  back.textContent = 'やめる';
+  back.onclick = () => box.remove();
+  const send = document.createElement('button');
+  send.className = 'ng';
+  send.textContent = 'お断りを送る';
+  send.onclick = async () => {
+    send.disabled = true;
+    try { await setStatus(r.id, 'お断り', input.value.trim()); } finally { send.disabled = false; }
+  };
+  acts.append(back, send);
+  box.append(input, acts);
+  card.appendChild(box);
+}
+
+async function setStatus(id, status, reason) {
+  try {
+    const j = await post({ action: 'staffSetStatus', id, status, reason: reason || '' });
+    showMsg(`「${status}」にしました。${j.note || ''}`);
+    await Promise.all([loadStaff(), loadCalendar()]);
+  } catch (e) {
+    showMsg(e.message, true);
+  }
+}
+
+function updateAddForm() {
+  const closed = $('a-route').value === '休館';
+  $('a-detail').classList.toggle('hidden', closed);
+  if (closed && staffData) { // 休館は終日を初期値にする
+    $('a-start').value = staffData.open;
+    $('a-end').value = staffData.close;
+  }
+}
+
+async function addReservation() {
+  const data = {
+    action: 'staffAdd',
+    route: $('a-route').value,
+    date: $('a-date').value,
+    start: Number($('a-start').value),
+    end: Number($('a-end').value),
+    name: $('a-name').value.trim(),
+    purpose: $('a-purpose').value.trim(),
+    people: $('a-people').value,
+    phone: $('a-phone').value.trim(),
+    memo: $('a-memo').value.trim(),
+  };
+  if (data.route !== '休館' && !data.name) { showMsg('氏名・団体名を入力してください。', true); return; }
+  if (data.start >= data.end) { showMsg('終了は開始より後の時刻にしてください。', true); return; }
+  const btn = $('a-submit');
+  btn.disabled = true;
+  try {
+    const j = await post(data);
+    showMsg(`登録しました。予約番号：${j.id}\n${label(data.date)} ${hh(data.start)}〜${hh(data.end)}（${data.route}）`);
+    ['a-name', 'a-purpose', 'a-people', 'a-phone', 'a-memo'].forEach((id) => { $(id).value = ''; });
+    await Promise.all([loadStaff(), loadCalendar()]);
+  } catch (e) {
+    showMsg(e.message, true);
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+async function joinStaff() {
+  const name = $('j-name').value.trim();
+  const code = $('j-code').value.trim();
+  if (!name || !code) { showMsg('氏名と合言葉を入力してください。', true); return; }
+  const btn = $('j-submit');
+  btn.disabled = true;
+  try {
+    await post({ action: 'staffRegister', name, code });
+    $('j-code').value = '';
+    showMsg('担当者として登録しました。新しい仮予約が入ると、公式LINEでお知らせが届きます。');
+    await checkStaff();
+  } catch (e) {
+    showMsg(e.message, true);
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+function setupStaffEvents() {
+  $('tab-pending').onclick = () => switchTab('pending');
+  $('tab-upcoming').onclick = () => switchTab('upcoming');
+  $('tab-add').onclick = () => switchTab('add');
+  $('a-route').onchange = updateAddForm;
+  $('a-submit').onclick = addReservation;
+  $('j-submit').onclick = joinStaff;
+  $('join-link').onclick = () => {
+    $('staff-join').classList.remove('hidden');
+    $('join-link').classList.add('hidden');
+    $('staff-join').scrollIntoView({ behavior: 'smooth' });
+  };
+}
+
 // ---- 起動 ----
 async function main() {
   $('prev').onclick = () => { startDate = addDays(startDate, -DAYS); if (startDate < today) startDate = today; closeDay(); loadCalendar(); };
   $('next').onclick = () => { startDate = addDays(startDate, DAYS); closeDay(); loadCalendar(); };
   $('day-close').onclick = closeDay;
   $('f-submit').onclick = submit;
+  setupStaffEvents();
   try {
     await liff.init({ liffId: LIFF_ID });
     if (!liff.isLoggedIn()) { liff.login({ redirectUri: location.href }); return; }
     idToken = liff.getIDToken();
     startDate = todayStr();
     today = startDate;
-    await Promise.all([loadCalendar(), loadMine()]);
+    await Promise.all([loadCalendar(), loadMine(), checkStaff().catch(() => {})]);
   } catch (e) {
     showMsg('起動できませんでした：' + e.message, true);
   }
